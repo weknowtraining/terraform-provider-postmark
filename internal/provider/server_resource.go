@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"terraform-provider-postmark/internal/provider/resource_server"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -18,6 +20,7 @@ var (
 	_ resource.Resource                = &serverResource{}
 	_ resource.ResourceWithConfigure   = &serverResource{}
 	_ resource.ResourceWithImportState = &serverResource{}
+	_ resource.ResourceWithModifyPlan  = &serverResource{}
 )
 
 func NewServerResource() resource.Resource {
@@ -66,6 +69,32 @@ func (r *serverResource) Create(ctx context.Context, req resource.CreateRequest,
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
+func (r *serverResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Skip create and destroy planning.
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var state resource_server.ServerModel
+	var plan resource_server.ServerModel
+
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Delivery type cannot be changed in-place by the Postmark API, so require replacement.
+	if !state.DeliveryType.IsUnknown() &&
+		!state.DeliveryType.IsNull() &&
+		!plan.DeliveryType.IsUnknown() &&
+		!plan.DeliveryType.IsNull() &&
+		state.DeliveryType.ValueString() != plan.DeliveryType.ValueString() {
+		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("delivery_type"))
+	}
+}
+
 func (r *serverResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var data resource_server.ServerModel
 
@@ -77,7 +106,13 @@ func (r *serverResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	// Read API call logic
-	resp.Diagnostics.Append(r.readFromAPI(ctx, &data)...)
+	found, diags := r.readFromAPI(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+
+	if !found {
+		resp.State.RemoveResource(ctx)
+		return
+	}
 
 	if resp.Diagnostics.HasError() {
 		return
@@ -126,14 +161,18 @@ func (r *serverResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 }
 
-func (r *serverResource) readFromAPI(ctx context.Context, server *resource_server.ServerModel) diag.Diagnostics {
+func (r *serverResource) readFromAPI(ctx context.Context, server *resource_server.ServerModel) (bool, diag.Diagnostics) {
 	res, err := r.client.GetServer(ctx, TypeStringToInt64(server.Id))
 	if err != nil {
+		if isNotFoundServerError(err) {
+			return false, nil
+		}
+
 		clientDiag := diag.NewErrorDiagnostic("Client Error", fmt.Sprintf("Unable to read server, got error: %s", err))
-		return diag.Diagnostics{clientDiag}
+		return false, diag.Diagnostics{clientDiag}
 	}
 
-	return mapServerResourceFromAPI(ctx, server, res)
+	return true, mapServerResourceFromAPI(ctx, server, res)
 }
 
 func (r *serverResource) createFromAPI(ctx context.Context, server *resource_server.ServerModel) diag.Diagnostics {
@@ -227,4 +266,25 @@ func mapServerResourceFromAPI(ctx context.Context, server *resource_server.Serve
 	server.EnableSmtpApiErrorHooks = types.BoolValue(res.EnableSMTPAPIErrorHooks)
 
 	return nil
+}
+
+func isNotFoundServerError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var apiErr postmark.APIError
+	if errors.As(err, &apiErr) {
+		message := strings.ToLower(apiErr.Message)
+		if strings.Contains(message, "not found") || strings.Contains(message, "does not exist") {
+			return true
+		}
+	}
+
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "unexpected end of json input") {
+		return true
+	}
+
+	return strings.Contains(message, "not found") || strings.Contains(message, "does not exist")
 }
