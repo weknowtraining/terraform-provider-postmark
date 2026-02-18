@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"terraform-provider-postmark/internal/provider/resource_webhook"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -78,7 +80,13 @@ func (r *webhookResource) Read(ctx context.Context, req resource.ReadRequest, re
 	}
 
 	// Read API call logic
-	resp.Diagnostics.Append(r.readFromAPI(ctx, &data)...)
+	found, diags := r.readFromAPI(ctx, &data)
+	resp.Diagnostics.Append(diags...)
+
+	if !found {
+		resp.State.RemoveResource(ctx)
+		return
+	}
 
 	if resp.Diagnostics.HasError() {
 		return
@@ -123,15 +131,19 @@ func (r *webhookResource) Delete(ctx context.Context, req resource.DeleteRequest
 	resp.Diagnostics.Append(r.deleteFromAPI(ctx, &data)...)
 }
 
-func (r *webhookResource) readFromAPI(ctx context.Context, webhook *resource_webhook.WebhookModel) diag.Diagnostics {
+func (r *webhookResource) readFromAPI(ctx context.Context, webhook *resource_webhook.WebhookModel) (bool, diag.Diagnostics) {
 	r.client.ServerToken = webhook.ServerApiToken.ValueString()
 	res, err := r.client.GetWebhook(ctx, TypeStringToInt(webhook.Id))
 	if err != nil {
+		if isWebhookGoneError(err) {
+			return false, nil
+		}
+
 		clientDiag := diag.NewErrorDiagnostic("Client Error", fmt.Sprintf("Unable to read webhook, got error: %s", err))
-		return diag.Diagnostics{clientDiag}
+		return false, diag.Diagnostics{clientDiag}
 	}
 
-	return mapWebhookResourceFromAPI(ctx, webhook, res)
+	return true, mapWebhookResourceFromAPI(ctx, webhook, res)
 }
 
 func (r *webhookResource) createFromAPI(ctx context.Context, webhook *resource_webhook.WebhookModel) diag.Diagnostics {
@@ -303,4 +315,29 @@ func mapWebhookResourceFromAPI(ctx context.Context, webhook *resource_webhook.We
 		})
 
 	return nil
+}
+
+func isWebhookGoneError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var apiErr postmark.APIError
+	if errors.As(err, &apiErr) {
+		message := strings.ToLower(apiErr.Message)
+		if strings.Contains(message, "not found") ||
+			strings.Contains(message, "does not exist") ||
+			strings.Contains(message, "valid server token") ||
+			strings.Contains(message, "invalid server token") ||
+			strings.Contains(message, "unauthorized") {
+			return true
+		}
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "not found") ||
+		strings.Contains(message, "does not exist") ||
+		strings.Contains(message, "valid server token") ||
+		strings.Contains(message, "invalid server token") ||
+		strings.Contains(message, "unauthorized")
 }
