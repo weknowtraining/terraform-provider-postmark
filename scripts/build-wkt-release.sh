@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEST="${POSTMARK_RELEASE_DIR:-${ROOT}/../dist/wkt-2.0.1-441f6c349ab1}"
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/wkt-postmark-build.XXXXXX")
+trap 'rm -rf "$STAGE"' EXIT
 COMMIT=441f6c349ab16a977c522994475053cc3e805abe
 REPOSITORY=weknowtraining/terraform-provider-postmark
 VERSION=2.0.1
@@ -30,8 +31,7 @@ if [[ "$go_version_out" != *"go${GO} "* ]]; then
   exit 1
 fi
 
-work=$(mktemp -d "${TMPDIR:-/tmp}/wkt-postmark-src.XXXXXX")
-trap 'rm -rf "$work" "$STAGE"' EXIT
+work=$(mktemp -d "${STAGE}/source.XXXXXX")
 git -C "$work" init -q
 git -C "$work" remote add origin "https://github.com/${REPOSITORY}.git"
 git -C "$work" fetch --depth 1 origin "$COMMIT"
@@ -45,9 +45,8 @@ build_zip() {
   goarch=${platform#*_}
   zip_name="terraform-provider-postmark_${VERSION}_${platform}.zip"
   bin="terraform-provider-postmark_v${VERSION}"
-  builddir=$(mktemp -d "${TMPDIR:-/tmp}/wkt-postmark-builddir.XXXXXX")
+  builddir=$(mktemp -d "${STAGE}/platform.XXXXXX")
   tmp_zip="${STAGE}/${zip_name}"
-  trap 'rm -rf "$builddir"' RETURN
 
   (
     cd "$work" || exit 1
@@ -88,6 +87,7 @@ with zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_STORED) as zf:
         zf.writestr(info, data)
 PY
   )
+  rm -rf "$builddir"
   chmod 0644 "$tmp_zip"
   echo "built ${zip_name} fingerprint=${FINGERPRINT}"
 }

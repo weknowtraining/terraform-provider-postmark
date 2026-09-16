@@ -41,7 +41,7 @@ Consumers keep provider source `app.terraform.io/weknowtraining/postmark` and
 version `2.0.1` for state compatibility, along with the audited lockfile hashes.
 The pinned binary keeps the historical `hashicorp.com/mcarey1590/postmark` Serve
 address; Terraform still discovers and runs it under the WKT source via this packed
-mirror (parent-verified with network-none `terraform init -lockfile=readonly` and
+mirror (verified with network-disabled `terraform init -lockfile=readonly` and
 provider schema RPC on the downloaded Linux package).
 Terraform finds the package in the mirror without contacting that registry.
 Run normal `terraform init -lockfile=readonly` after installation. GitHub Actions
