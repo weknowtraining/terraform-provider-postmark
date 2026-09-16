@@ -53,6 +53,7 @@ build_zip() {
     unset GOROOT GOPATH GOCACHE || true
     export GOTOOLCHAIN=local
     export GOENV=off
+    export GOWORK=off
     export GOFLAGS=
     export GOEXPERIMENT=
     export CGO_ENABLED=0
