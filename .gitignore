@@ -65,3 +65,6 @@ go.work.sum
 
 # env file
 .env
+
+# Locally built WKT release assets are uploaded to GitHub, not committed.
+/dist/
