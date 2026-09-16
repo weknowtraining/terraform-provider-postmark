@@ -8,7 +8,7 @@ case "$(uname -s)/$(uname -m)" in
 esac
 asset="terraform-provider-postmark_2.0.1_${platform}.zip"
 dest="${1:-.}/terraform.d/plugins/app.terraform.io/weknowtraining/postmark"
-stage=$(mktemp -d)
+stage=$(mktemp -d "${TMPDIR:-/tmp}/wkt-postmark-install.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
   "https://github.com/weknowtraining/terraform-provider-postmark/releases/download/wkt-2.0.1-441f6c349ab1/${asset}" \

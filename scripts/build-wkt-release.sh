@@ -30,7 +30,7 @@ if [[ "$go_version_out" != *"go${GO} "* ]]; then
   exit 1
 fi
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/wkt-postmark-src.XXXXXX")
 trap 'rm -rf "$work" "$STAGE"' EXIT
 git -C "$work" init -q
 git -C "$work" remote add origin "https://github.com/${REPOSITORY}.git"
@@ -45,8 +45,9 @@ build_zip() {
   goarch=${platform#*_}
   zip_name="terraform-provider-postmark_${VERSION}_${platform}.zip"
   bin="terraform-provider-postmark_v${VERSION}"
-  builddir=$(mktemp -d)
+  builddir=$(mktemp -d "${TMPDIR:-/tmp}/wkt-postmark-builddir.XXXXXX")
   tmp_zip="${STAGE}/${zip_name}"
+  trap 'rm -rf "$builddir"' RETURN
 
   (
     cd "$work" || exit 1
@@ -87,7 +88,6 @@ with zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_STORED) as zf:
         zf.writestr(info, data)
 PY
   )
-  rm -rf "$builddir"
   chmod 0644 "$tmp_zip"
   echo "built ${zip_name} fingerprint=${FINGERPRINT}"
 }
