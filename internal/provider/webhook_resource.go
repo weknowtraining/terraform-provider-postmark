@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"terraform-provider-postmark/internal/provider/resource_webhook"
@@ -37,6 +38,7 @@ func (r *webhookResource) Metadata(_ context.Context, req resource.MetadataReque
 
 func (r *webhookResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = resource_webhook.WebhookResourceSchema(ctx)
+	resp.Schema.Description = "Manages a Postmark webhook. Creation skips endpoint verification so the webhook can be registered before the application is ready. The endpoint must be operational before it can process events."
 }
 
 func (r *webhookResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -147,9 +149,18 @@ func (r *webhookResource) readFromAPI(ctx context.Context, webhook *resource_web
 }
 
 func (r *webhookResource) createFromAPI(ctx context.Context, webhook *resource_webhook.WebhookModel) diag.Diagnostics {
-	r.client.ServerToken = webhook.ServerApiToken.ValueString()
+	// Scope the transport override to creation; do not mutate the shared client.
+	client := *r.client
+	client.ServerToken = webhook.ServerApiToken.ValueString()
+	httpClient := *client.HTTPClient
+	transport := httpClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	httpClient.Transport = webhookCreateTransport{base: transport}
+	client.HTTPClient = &httpClient
 	body := r.mapResourceToAPI(ctx, webhook)
-	res, err := r.client.CreateWebhook(ctx, body)
+	res, err := client.CreateWebhook(ctx, body)
 	if err != nil {
 		clientDiag := diag.NewErrorDiagnostic("Client Error", fmt.Sprintf("Unable to create webhook, got error: %s", err))
 		return diag.Diagnostics{clientDiag}
@@ -340,4 +351,20 @@ func isWebhookGoneError(err error) bool {
 		strings.Contains(message, "valid server token") ||
 		strings.Contains(message, "invalid server token") ||
 		strings.Contains(message, "unauthorized")
+}
+
+// webhookCreateTransport disables Postmark's creation-time callback probes.
+// The client library does not expose the verification query parameter.
+type webhookCreateTransport struct {
+	base http.RoundTripper
+}
+
+func (t webhookCreateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodPost && req.URL.Path == "/webhooks" {
+		req = req.Clone(req.Context())
+		query := req.URL.Query()
+		query.Set("verify", "false")
+		req.URL.RawQuery = query.Encode()
+	}
+	return t.base.RoundTrip(req)
 }

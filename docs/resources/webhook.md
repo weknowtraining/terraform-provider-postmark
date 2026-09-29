@@ -3,12 +3,12 @@
 page_title: "postmark_webhook Resource - postmark"
 subcategory: ""
 description: |-
-  
+  Manages a Postmark webhook. Creation skips endpoint verification so the webhook can be registered before the application is ready. The endpoint must be operational before it can process events.
 ---
 
 # postmark_webhook (Resource)
 
-
+Manages a Postmark webhook. Creation skips endpoint verification so the webhook can be registered before the application is ready. The endpoint must be operational before it can process events.
 
 ## Example Usage
 
