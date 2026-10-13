@@ -2,16 +2,16 @@
 # Install the audited WKT package into the caller's Terraform filesystem mirror.
 set -euo pipefail
 case "$(uname -s)/$(uname -m)" in
-  Linux/x86_64) platform=linux_amd64; checksum=4cf863dfbde3bb340d99e23f67cb14545dd738d94a40c2f4dbe7f47f1176262f ;;
-  Darwin/arm64) platform=darwin_arm64; checksum=ce00a7362a0ce38c3ca12109350db608e38a6ad2a18cc71c6429e76cc84364f3 ;;
+  Linux/x86_64) platform=linux_amd64; checksum=a6b0698d92072a415660f1116428a830bee8f1a2f4d2e237e9678fd3d0af4eea ;;
+  Darwin/arm64) platform=darwin_arm64; checksum=e5391cc73db51876e23889fa13213a545781669e2058bd7a69ab7c973eaf96a2 ;;
   *) echo 'Unsupported platform; supported: linux_amd64, darwin_arm64' >&2; exit 1 ;;
 esac
-asset="terraform-provider-postmark_2.0.1_${platform}.zip"
+asset="terraform-provider-postmark_2.0.3_${platform}.zip"
 dest="${1:-.}/terraform.d/plugins/app.terraform.io/weknowtraining/postmark"
 stage=$(mktemp -d "${TMPDIR:-/tmp}/wkt-postmark-install.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-  "https://github.com/weknowtraining/terraform-provider-postmark/releases/download/wkt-2.0.1-441f6c349ab1/${asset}" \
+  "https://github.com/weknowtraining/terraform-provider-postmark/releases/download/wkt-2.0.3-f3a24492bf05/${asset}" \
   --output "$stage/$asset"
 python3 - "$stage/$asset" "$checksum" <<'PY'
 import hashlib, pathlib, sys
@@ -20,4 +20,4 @@ if hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest() != sys.arg
 PY
 mkdir -p "$dest"
 cp "$stage/$asset" "$dest/$asset"
-echo "Installed verified Postmark 2.0.1 (${platform})"
+echo "Installed verified Postmark 2.0.3 (${platform})"
