@@ -3,17 +3,17 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-DEST="${POSTMARK_RELEASE_DIR:-${ROOT}/../dist/wkt-2.0.1-441f6c349ab1}"
+DEST="${POSTMARK_RELEASE_DIR:-${ROOT}/../dist/wkt-2.0.3-f3a24492bf05}"
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/wkt-postmark-build.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
-COMMIT=441f6c349ab16a977c522994475053cc3e805abe
+COMMIT=f3a24492bf05b9588ca69f4e954cd4fb0acbd4ad
 REPOSITORY=weknowtraining/terraform-provider-postmark
-VERSION=2.0.1
+VERSION=2.0.3
 GO=1.23.0
 FINGERPRINT='cgo0-modvendor-trimpath-buildvcs0-ldflags-s-w-gotoolchain-local-goenv-off-goamd64-v1-goarm64-v8.0-zip-stored'
 
-EXPECTED_ZH_darwin_arm64=ce00a7362a0ce38c3ca12109350db608e38a6ad2a18cc71c6429e76cc84364f3
-EXPECTED_ZH_linux_amd64=4cf863dfbde3bb340d99e23f67cb14545dd738d94a40c2f4dbe7f47f1176262f
+EXPECTED_ZH_darwin_arm64=e5391cc73db51876e23889fa13213a545781669e2058bd7a69ab7c973eaf96a2
+EXPECTED_ZH_linux_amd64=a6b0698d92072a415660f1116428a830bee8f1a2f4d2e237e9678fd3d0af4eea
 
 platforms=(darwin_arm64 linux_amd64)
 if (($# > 0)); then
@@ -67,7 +67,7 @@ build_zip() {
       -ldflags="-s -w -X main.version=${VERSION}" \
       -o "$builddir/$bin" . || exit $?
     chmod 0755 "$builddir/$bin" || exit $?
-    python3 - "$tmp_zip" "$work" "$builddir/$bin" "$bin" <<'PY' || exit $?
+    python3 - "$tmp_zip" "$work" "$builddir/$bin" "$bin" <<'PYZ' || exit $?
 import pathlib, sys, zipfile
 
 out_zip, src_root, binary_path, arcname = sys.argv[1:5]
@@ -86,7 +86,7 @@ with zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_STORED) as zf:
         info.create_system = 3
         info.external_attr = (mode & 0xFFFF) << 16
         zf.writestr(info, data)
-PY
+PYZ
   )
   rm -rf "$builddir"
   chmod 0644 "$tmp_zip"
@@ -94,21 +94,23 @@ PY
 }
 
 verify_zip() {
-  local platform="$1" zip_path expected
+  local platform="$1" zip_path expected actual
   zip_path="${STAGE}/terraform-provider-postmark_${VERSION}_${platform}.zip"
   case "$platform" in
     darwin_arm64) expected=$EXPECTED_ZH_darwin_arm64 ;;
     linux_amd64) expected=$EXPECTED_ZH_linux_amd64 ;;
-    *) echo "no expected zh for ${platform}" >&2; return 1 ;;
+    *) echo "Unsupported platform: $platform" >&2; exit 1 ;;
   esac
-  python3 - "$zip_path" "$expected" <<'PY'
+  actual=$(python3 - "$zip_path" <<'PYV'
 import hashlib, pathlib, sys
-zip_path, expected = sys.argv[1:3]
-zh = hashlib.sha256(pathlib.Path(zip_path).read_bytes()).hexdigest()
-if zh != expected:
-    raise SystemExit(f"zh mismatch for {pathlib.Path(zip_path).name}: got {zh} expected {expected}")
-print(f"verify {pathlib.Path(zip_path).name} zh={zh}")
-PY
+print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())
+PYV
+)
+  if [[ "$actual" != "$expected" ]]; then
+    echo "Checksum mismatch for ${platform}: expected ${expected}, got ${actual}" >&2
+    exit 1
+  fi
+  echo "verified ${platform} sha256=${actual}"
 }
 
 for platform in "${platforms[@]}"; do
@@ -120,6 +122,9 @@ done
 
 for platform in "${platforms[@]}"; do
   build_zip "$platform"
+done
+
+for platform in "${platforms[@]}"; do
   verify_zip "$platform"
 done
 
@@ -128,21 +133,23 @@ for platform in "${platforms[@]}"; do
   mv -f "${STAGE}/${zip_name}" "${DEST}/${zip_name}"
 done
 
-python3 - "$DEST" "$COMMIT" "$GO" "$FINGERPRINT" "${platforms[@]}" <<'PY'
+python3 - "$DEST" "$COMMIT" "$GO" "$FINGERPRINT" "${platforms[@]}" <<'PYP'
 import hashlib, json, pathlib, sys
 dest = pathlib.Path(sys.argv[1])
+version = "2.0.3"
+release = "wkt-2.0.3-f3a24492bf05"
 assets = {}
 for platform in sys.argv[5:]:
-    name = f"terraform-provider-postmark_2.0.1_{platform}.zip"
+    name = f"terraform-provider-postmark_{version}_{platform}.zip"
     assets[name] = hashlib.sha256((dest / name).read_bytes()).hexdigest()
-(dest / "terraform-provider-postmark_2.0.1_SHA256SUMS").write_text(
+(dest / f"terraform-provider-postmark_{version}_SHA256SUMS").write_text(
     "".join(f"{checksum}  {name}\n" for name, checksum in sorted(assets.items()))
 )
 (dest / "provenance.json").write_text(json.dumps({
     "repository": "weknowtraining/terraform-provider-postmark",
     "source_commit": sys.argv[2], "go_version": sys.argv[3],
-    "build_fingerprint": sys.argv[4], "provider_version": "2.0.1",
-    "release": "wkt-2.0.1-441f6c349ab1", "sha256": assets,
+    "build_fingerprint": sys.argv[4], "provider_version": version,
+    "release": release, "sha256": assets,
 }, indent=2) + "\n")
-PY
+PYP
 echo "Release assets written to ${DEST}"
